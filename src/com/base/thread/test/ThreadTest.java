@@ -81,5 +81,22 @@ public class ThreadTest {
         }, 1, 3, TimeUnit.SECONDS);
     }
 
+    @Test
+    public void testJoin() throws InterruptedException {
+        System.out.println(Thread.currentThread().getName()+" thread begin running...");
+        MyThread thread = new MyThread();
+
+        thread.setName("thread-B");
+        thread.join();
+//        thread.notify();
+        if(thread.isAlive()){
+            System.out.println("thread-B alive...");
+        }
+        System.out.println("The active count: "+Thread.activeCount());
+
+        System.out.println("This thread-B ending and beginning the main thread....");
+
+    }
+
 
 }
