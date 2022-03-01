@@ -8,8 +8,10 @@ import it.unisa.dia.gas.jpbc.Pairing;
 import it.unisa.dia.gas.jpbc.PairingParameters;
 import it.unisa.dia.gas.plaf.jpbc.pairing.PairingFactory;
 import it.unisa.dia.gas.plaf.jpbc.pairing.a.TypeACurveGenerator;
+import it.unisa.dia.gas.plaf.jpbc.pbc.curve.PBCTypeACurveGenerator;
 
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 
@@ -20,12 +22,14 @@ public class KacRevokedShema {
     Pairing pairing;
 //    Element generator_g;
 
+
     public Pairing initCurveByDynamic(int rBit, int qBit) {
         /*
         rBit是 Zp 中阶数 p 的比特长度；和密钥长度有关
         qBit是 G 中阶数的比特长度，和线性群G1的大小有关
          */
         TypeACurveGenerator pg = new TypeACurveGenerator(rBit, qBit);
+//        PBCTypeACurveGenerator pg = new PBCTypeACurveGenerator(rBit, qBit);
         PairingParameters typeAParams = pg.generate();
         this.pairing = PairingFactory.getPairing(typeAParams);
         return pairing;
@@ -73,7 +77,7 @@ public class KacRevokedShema {
         ArrayList<Element> mpk = new ArrayList<>();
 
         // step 1
-        Pairing pairing = initCurveByDynamic(8, lamada);
+        Pairing pairing = initCurveByDynamic(160, lamada);
 
         Element generator_g = getRandomElement("g_1", pairing);
         Element secretly_a = getRandomElement("z_p", pairing);
@@ -82,11 +86,11 @@ public class KacRevokedShema {
         this.m = 0;
         this.fileNum = fileNum;
         if (this.m < fileNum) {
-            this.m = fileNum + 1;
+            this.m = 2 * fileNum;
         }
 
         for (int i = 0; i <= m * 2; i++) {
-            if (i == m) continue;
+            if (i == m + 1) continue;
             if (i == 0) {
                 params.add(generator_g);
                 continue;
@@ -142,17 +146,24 @@ public class KacRevokedShema {
 
         Element c_1 = g.powZn(t);
         Element c_2 = (mpk.get(0).mul(pk_i.get(1))).powZn(t);
-        Element pairing_res = this.pairing.pairing(params.get(1).powZn(t), params.get(m + 1));
+        Element pairing_res = this.pairing.pairing(params.get(1).powZn(t), params.get(m));
 
 //        Element pairing_res2 = this.pairing.pairing(params.get(0), params.get(m + 1).powZn(t));
 
 
-        Element c_3 = pairing_res.mul(data);
+        Element plain_text = pairing.getGT().newRandomElement();
 
-        BigInteger multiply = data.multiply(pairing_res.toBigInteger());
-        if(c_3.toBigInteger() == multiply) {
-            System.out.println("true");
-        }
+        String plain_text_string = "abcdefghigklmnaaabcdefghigklmnaa";
+        byte[] plain_text_bytes = plain_text_string.getBytes(StandardCharsets.UTF_8);
+        Element plain_text_test = pairing.getG1().newElementFromBytes(plain_text_bytes);
+
+        plain_text.setFromBytes(plain_text_bytes);
+
+        byte[] bytes = plain_text.toBytes();
+
+//        Element c_3 = pairing_res.mul(data);
+        Element c_3 = plain_text.mul(pairing_res);
+
 
 
         Element c_4 = pk_i.get(2).powZn(t);
@@ -192,7 +203,7 @@ public class KacRevokedShema {
 
     }
 
-    public BigInteger decrypt(ArrayList<Element> k_sk,
+    public byte[] decrypt(ArrayList<Element> k_sk,
                               ArrayList<Element> params,
                               ArrayList<Element> mpk,
                               HashMap<Integer, ArrayList<Element>> pub,
@@ -205,10 +216,13 @@ public class KacRevokedShema {
         Element num_mul = null;
         for (int j : s_k) {
             int index = m + 1 - j + i;
+            if(i == j) {
+                continue;
+            }
             if (num_mul == null) {
-                num_mul = params.get(index - 1);
+                num_mul = params.get(index);
             } else {
-                num_mul = num_mul.mul(params.get(index - 1));
+                num_mul = num_mul.mul(params.get(index));
             }
         }
         Element e_secondParams = k_sk_1.mul(num_mul);
@@ -220,12 +234,54 @@ public class KacRevokedShema {
 
         Element plain_text_element = numerator.div(denominator);
 
+        byte[] bytes = plain_text_element.toBytes();
         BigInteger plain_text = plain_text_element.toBigInteger();
 
-        return plain_text;
+        return bytes;
 
 
     }
+
+
+    public byte[] decrypt2(ArrayList<Element> k_sk,
+                          ArrayList<Element> params,
+                          ArrayList<Element> mpk,
+                          HashMap<Integer, ArrayList<Element>> pub,
+                          int[] s_k,
+                          ArrayList<Element> encrypt_1,
+                          int i) {
+        Element k_sk_1 = k_sk.get(0);
+
+
+        Element num_mul = null;
+        for (int j : s_k) {
+            int index = m + 1 - j + i;
+            if(i == j) {
+                continue;
+            }
+            if (num_mul == null) {
+                num_mul = params.get(index);
+            } else {
+                num_mul = num_mul.mul(params.get(index));
+            }
+        }
+        Element e_secondParams = k_sk_1.mul(num_mul);
+        Element e_res = this.pairing.pairing(encrypt_1.get(0), e_secondParams);
+        Element numerator = encrypt_1.get(2).mul(e_res);
+        Element denominator_firstParam = this.pairing.pairing(k_sk.get(1), encrypt_1.get(1));
+        Element denominator_secondParam = this.pairing.pairing(encrypt_1.get(3), k_sk.get(2));
+        Element denominator = denominator_firstParam.mul(denominator_secondParam);
+
+        Element plain_text_element = numerator.div(denominator);
+
+        byte[] bytes = plain_text_element.toBytes();
+        BigInteger plain_text = plain_text_element.toBigInteger();
+
+        return bytes;
+
+
+    }
+
 
 
 }

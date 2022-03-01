@@ -12,6 +12,8 @@ repositories {
 dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.7.0'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
+    implementation 'com.googlecode.princeton-java-introduction:stdlib:1.0.1'
+    implementation fileTree(dir: "H:\\lib\\jpbc-2.0.0\\jars", includes: ['*.jar'])
 }
 
 test {
