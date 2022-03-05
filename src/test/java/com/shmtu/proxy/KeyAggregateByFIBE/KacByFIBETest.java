@@ -43,7 +43,9 @@ public class KacByFIBETest {
 
         kacByFIBE.extract(pairingParametersFileName, sk, paramsFileName, mpkFileName, mskFileName, pubFileName, kskFileName);
 
+//        Element res = kacByFIBE.decrypt2(pairingParametersFileName, kskFileName, paramsFileName, mpkFileName, pubFileName, sk, ctFileName, 11, mskFileName);
         Element res = kacByFIBE.decrypt(pairingParametersFileName, kskFileName, paramsFileName, mpkFileName, pubFileName, sk, ctFileName, 11);
+
         System.out.println("解密结果:" + res);
         if (message.isEqual(res)) {
             System.out.println("成功解密！");

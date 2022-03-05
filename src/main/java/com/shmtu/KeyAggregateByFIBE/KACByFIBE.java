@@ -40,9 +40,10 @@ public class KACByFIBE {
         Element a = bp.getZr().newRandomElement().getImmutable();
         paramsProp.setProperty("g", Base64.getEncoder().withoutPadding().encodeToString(g.toBytes()));
 
-        for (int i = 0; i <= 2 * m; i++) {
+        for (int i = 1; i <= 2 * m; i++) {
             Element a_pow_i = a.pow(BigInteger.valueOf(i));
-            paramsProp.setProperty("g" + i, Base64.getEncoder().withoutPadding().encodeToString(g.powZn(a_pow_i).toBytes()));
+            Element g_i = g.powZn(a_pow_i);
+            paramsProp.setProperty("g" + i, Base64.getEncoder().withoutPadding().encodeToString(g_i.toBytes()));
         }
 
         Element r = bp.getZr().newRandomElement().getImmutable();
@@ -95,6 +96,7 @@ public class KACByFIBE {
         Element g = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g"))).getImmutable();
         Element g1 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g1"))).getImmutable();
         Element gm = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + m))).getImmutable();
+        Element gm1 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + (m + 1)))).getImmutable();
         Element mpk = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(mpkProp.getProperty("mpk"))).getImmutable();
         Element pki_3 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(pubProp.getProperty("pk" + i + "_3"))).getImmutable();
         Element pki_4 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(pubProp.getProperty("pk" + i + "_4"))).getImmutable();
@@ -113,8 +115,12 @@ public class KACByFIBE {
         ctProp.setProperty("t", Base64.getEncoder().withoutPadding().encodeToString(t.toBytes()));
 
         // verify M*e(g1^t, gm)*e(g1^-t, gm) = e(g1^t, gm)*e(g1^-t, gm)*M
-        Element plainText2 = c3.mul(bp.pairing(g1.powZn(t.mul(-1)), gm));
-        Element plainText3 = bp.pairing(g1.powZn(t.mul(-1)), gm).mul(c3);
+        Element plainText2 = c3.mul(bp.pairing(g1.powZn(t.mul(-1)), gm).getImmutable());
+        Element plainText3 = bp.pairing(g1.powZn(t.mul(-1)), gm).getImmutable().mul(c3);
+        Element plainTest4 = message.mul((bp.pairing(g1.powZn(t), gm).getImmutable().mul(bp.pairing(g1.powZn(t.mul(-1)), gm).getImmutable())));
+        // verify  M*e(g1^t, gm) =  M*e(g^t, gm+1), compare c3 and M*e(g^t, gm+1)
+        Element ciptxText = message.mul(bp.pairing(g.powZn(t), gm1).getImmutable());
+
 
         storePropToFile(ctProp, ctFileName);
     }
@@ -147,11 +153,15 @@ public class KACByFIBE {
         result = result.getImmutable();
         Element Ksk1 = result.powZn(rk);
         Element Ksk2 = result.powZn(rk.div(r));
-        Element Ksk3 = result.powZn(r.sub(y.div(rk)));
+
+        Element Ksk3 = result.powZn(r.sub(y.mulZn(rk)));
+        // verify correct of Ksk3
+        Element Ksk321 = result.powZn(r).div(result.powZn(y.div(rk)));
 
         KskProp.setProperty("Ksk1", Base64.getEncoder().withoutPadding().encodeToString(Ksk1.toBytes()));
         KskProp.setProperty("Ksk2", Base64.getEncoder().withoutPadding().encodeToString(Ksk2.toBytes()));
         KskProp.setProperty("Ksk3", Base64.getEncoder().withoutPadding().encodeToString(Ksk3.toBytes()));
+        KskProp.setProperty("rk", Base64.getEncoder().withoutPadding().encodeToString(rk.toBytes()));
         storePropToFile(KskProp, kskFileName);
     }
 
@@ -188,15 +198,178 @@ public class KACByFIBE {
         res = res.getImmutable();
 
         // way1
-        Element plainText = c3.mul(bp.pairing(c1, Ksk1.mul(res))).div(bp.pairing(Ksk2, c2).mul(bp.pairing(c4, Ksk3)));
+        Element plainText = c3.mul(bp.pairing(c1, Ksk1.mul(res)).getImmutable()).div(bp.pairing(Ksk2, c2).getImmutable().mul(bp.pairing(c4, Ksk3).getImmutable()));
         // way2
         Element t = bp.getZr().newElementFromBytes(Base64.getDecoder().decode(ctProp.getProperty("t"))).getImmutable();
         Element g1 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g1"))).getImmutable();
         Element gm = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + m))).getImmutable();
-        Element plainText2 = c3.mulZn(bp.pairing(g1.powZn(t.mul(-1)), gm));
+        Element plainText2 = c3.mulZn(bp.pairing(g1.powZn(t.mul(-1)), gm).getImmutable());
         return plainText;
 
     }
+
+    public static Element decrypt2(String pairingParametersFileName, String kskFileName, String paramsFileName, String mpkFileName, String pubFileName, int[] sk, String ctFileName, int i,
+                                   String mskFileName) {
+        Pairing bp = PairingFactory.getPairing(pairingParametersFileName);
+        Properties pubProp = loadPropFromFile(pubFileName);
+        Properties mpkProp = loadPropFromFile(mpkFileName);
+        Properties paramsProp = loadPropFromFile(paramsFileName);
+        Properties kskProp = loadPropFromFile(kskFileName);
+        Properties ctProp = loadPropFromFile(ctFileName);
+        Properties mskProp = loadPropFromFile(mskFileName);
+
+        int m = Integer.valueOf(new String(Base64.getDecoder().decode(mpkProp.getProperty("m")))).intValue();
+        Element Ksk1 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(kskProp.getProperty("Ksk1"))).getImmutable();
+        Element Ksk2 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(kskProp.getProperty("Ksk2"))).getImmutable();
+        Element Ksk3 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(kskProp.getProperty("Ksk3"))).getImmutable();
+
+        Element c1 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(ctProp.getProperty("c1"))).getImmutable();
+        Element c2 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(ctProp.getProperty("c2"))).getImmutable();
+        Element c3 = bp.getGT().newElementFromBytes(Base64.getDecoder().decode(ctProp.getProperty("c3"))).getImmutable();
+        Element c4 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(ctProp.getProperty("c4"))).getImmutable();
+
+        // according paper to computer p1
+        Element p1_1_pairing_mul = null;
+        for (int j : sk) {
+            if (i == j) {
+                continue;
+            }
+            int index = m + 1 - j + i;
+            Element g_index = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + index))).getImmutable();
+            if (p1_1_pairing_mul == null) {
+                p1_1_pairing_mul = g_index;
+                continue;
+            }
+            p1_1_pairing_mul = p1_1_pairing_mul.mul(g_index);
+        }
+        Element p1_1_pairing2 = Ksk1.mul(p1_1_pairing_mul);
+        Element p1_1 = bp.pairing(c1, p1_1_pairing2).getImmutable();
+
+        // according verify way to computer the p1
+        Element t = bp.getZr().newElementFromBytes(Base64.getDecoder().decode(ctProp.getProperty("t"))).getImmutable();
+        Element rk = bp.getZr().newElementFromBytes(Base64.getDecoder().decode(kskProp.getProperty("rk"))).getImmutable();
+        Element g = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g"))).getImmutable();
+        Element g_t = g.powZn(t);
+
+        Element p1_2_pairing1_mul = null; // the fist pairing mul params of p1
+        for (int j : sk) {
+            int index = m + 1 - j;
+            Element g_index = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + index))).getImmutable();
+            Element g_index_1 = g_index.powZn(rk);
+            if (p1_2_pairing1_mul == null) {
+                p1_2_pairing1_mul = g_index_1;
+                continue;
+            }
+            p1_2_pairing1_mul = p1_2_pairing1_mul.mul(g_index_1);
+        }
+        Element p1_2_pairing1 = bp.pairing(g_t, p1_2_pairing1_mul).getImmutable();
+
+        Element p1_2_pairing2_mul = null; // the second pairing mul params of p1
+        for (int j : sk) {
+            if (i == j) {
+                continue;
+            }
+            int index = m + 1 - j + i;
+            Element g_index = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + index))).getImmutable();
+            if (p1_2_pairing2_mul == null) {
+                p1_2_pairing2_mul = g_index;
+                continue;
+            }
+            p1_2_pairing2_mul = p1_2_pairing2_mul.mul(g_index);
+        }
+        Element p1_2_pairing2 = bp.pairing(g_t, p1_2_pairing2_mul).getImmutable();
+        Element p1_2 = p1_2_pairing1.mul(p1_2_pairing2);
+        if (p1_1.equals(p1_2)) {
+            System.out.println("p1 verify success...");
+        }
+
+
+        // according paper to computer p2
+        Element p2_1 = bp.pairing(Ksk2, c2).getImmutable();
+
+        // according verify way to computer the p2
+        Element y = bp.getZr().newElementFromBytes(Base64.getDecoder().decode(mskProp.getProperty("y"))).getImmutable();
+        Element r = bp.getZr().newElementFromBytes(Base64.getDecoder().decode(mskProp.getProperty("r"))).getImmutable();
+        Element gi = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + i))).getImmutable();
+        Element gi_t = gi.powZn(t);
+        Element p2_2_pairing2_mul = null;
+        Element pow_num = y.mulZn(rk).mulZn(r.pow(BigInteger.valueOf(-1)));
+        for (int j : sk) {
+            int index = m + 1 - j;
+            Element g_index = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + index))).getImmutable();
+            Element g_index_pow = g_index.powZn(pow_num);
+            if (p2_2_pairing2_mul == null) {
+                p2_2_pairing2_mul = g_index_pow;
+                continue;
+            }
+            p2_2_pairing2_mul = p2_2_pairing2_mul.mul(g_index_pow);
+        }
+        Element p2_2_pairing1 = bp.pairing(g_t, p1_2_pairing1_mul).getImmutable();
+        Element p2_2_pairing2 = bp.pairing(gi_t, p2_2_pairing2_mul).getImmutable();
+        Element p2_2 = p2_2_pairing1.mul(p2_2_pairing2);
+        if (p2_1.equals(p2_2)) {
+            System.out.println("p2 verify success...");
+        }
+
+
+        // according paper to computer p3
+        Element p3_1 = bp.pairing(Ksk3, c4).getImmutable(); // e(x, y) == e(y, x) --> true
+
+
+        // according verify way to computer the p3
+        Element p3_2_pairing1_mul = null;
+        for(int j : sk){
+            int index = m + 1 -j;
+            Element g_index = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + index))).getImmutable();
+            if(p3_2_pairing1_mul == null){
+                p3_2_pairing1_mul = g_index;
+                continue;
+            }
+            p3_2_pairing1_mul = p3_2_pairing1_mul.mul(g_index);
+        }
+        Element p3_2_pairing1 = bp.pairing(gi_t, p3_2_pairing1_mul).getImmutable();
+
+        Element p3_2_pairing2_mul = null;
+//        Element pow_num_3 = y.mulZn(rk).mulZn(r.pow(BigInteger.valueOf(-1))).negate();
+        Element pow_num_3 = y.mulZn(rk).div(r).negate();
+        for (int j : sk) {
+            int index = m + 1 - j;
+            Element g_index = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + index))).getImmutable();
+            Element g_index_pow = g_index.powZn(pow_num_3);
+            if (p3_2_pairing2_mul == null) {
+                p3_2_pairing2_mul = g_index_pow;
+                continue;
+            }
+            p3_2_pairing2_mul = p3_2_pairing2_mul.mul(g_index_pow);
+        }
+        Element p3_2_pairing2 = bp.pairing(gi_t, p3_2_pairing2_mul).getImmutable();
+
+        Element p3_2 = p3_2_pairing1.mul(p3_2_pairing2);
+        if (p3_1.equals(p3_2)) {
+            System.out.println("p3 verify success...");
+        }
+
+        // get message
+        Element res_secondParam = p1_1.div(p2_1.mul(p3_2));
+        // c3*(ewq) = M, ewq == p1/(p2*p3) == res_secondParam
+        Element g1 = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g1"))).getImmutable();
+        Element gm = bp.getG1().newElementFromBytes(Base64.getDecoder().decode(paramsProp.getProperty("g" + m))).getImmutable();
+        Element ewq = bp.pairing(g1.powZn(t.mul(-1)), gm).getImmutable();
+
+
+        Element res = c3.mul(res_secondParam);
+        Element res_2 = c3.mul(ewq);
+
+        return res_2;
+
+    }
+
+
+
+
+
+
+
 
     //计算由coef为系数确定的多项式qx在点x处的值，注意多项式计算在群Zr上进行
     public static Element qx(Element x, Element[] coef, Field Zr) {
